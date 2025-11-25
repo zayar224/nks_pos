@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+body {
+  font-family: "Inter", sans-serif;
+}
+
+.product-grid {
+  @apply grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4;
+}
+
+.btn-primary {
+  @apply bg-blue-500 text-white p-2 rounded hover:bg-blue-600 transition;
+}
