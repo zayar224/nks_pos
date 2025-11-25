@@ -9,7 +9,7 @@
     "start": "node backend/server.js"
   },
   "keywords": [],
-  "author": "",
+  "author": "Zayar Min Htet",
   "license": "ISC",
   "description": "",
   "dependencies": {
