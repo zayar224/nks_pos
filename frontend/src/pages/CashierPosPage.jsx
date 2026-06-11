@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import axios from "../api/axiosInstance";
 import PaymentModal from "../components/PaymentModal";
+import CameraScanner from "../components/CameraScanner";
 import AuthContext from "../context/AuthContext";
 import { toast } from "react-toastify";
 import { Transition } from "@headlessui/react";
@@ -43,6 +44,7 @@ function CashierPosPage() {
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [heldOrders, setHeldOrders] = useState([]);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isHeldOrdersOpen, setIsHeldOrdersOpen] = useState(false);
   const [attendance, setAttendance] = useState(null);
   const [currentTime, setCurrentTime] = useState(
@@ -62,6 +64,10 @@ function CashierPosPage() {
   });
   const [error, setError] = useState("");
   const [expandedItems, setExpandedItems] = useState({});
+  const [productUnitsMap, setProductUnitsMap] = useState({});
+  const [isUnitSelectorOpen, setIsUnitSelectorOpen] = useState(false);
+  const [selectedProductForUnit, setSelectedProductForUnit] = useState(null);
+  const cartItemIdRef = useRef(0);
   const barcodeInputRef = useRef(null);
 
   // Toggle item details for small screens
@@ -186,6 +192,7 @@ function CashierPosPage() {
       );
       setProducts(response.data);
       setFilteredProducts(response.data);
+      fetchProductUnits(response.data);
     } catch (err) {
       console.error("Fetch products error:", err);
       setError(t("failed_to_fetch_products"));
@@ -194,6 +201,29 @@ function CashierPosPage() {
       setLoading((prev) => ({ ...prev, products: false }));
     }
   }, [t]);
+
+  // Fetch units for all products (in parallel)
+  const fetchProductUnits = async (products) => {
+    if (!products || products.length === 0) return;
+    const token = localStorage.getItem("token");
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const results = await Promise.allSettled(
+      products.map((product) =>
+        axios.get(
+          `${import.meta.env.VITE_API_URL}/products/${product.id}/units`,
+          config
+        )
+      )
+    );
+    const unitsMap = {};
+    products.forEach((product, i) => {
+      const res = results[i];
+      if (res.status === "fulfilled" && res.value.data && res.value.data.length > 0) {
+        unitsMap[product.id] = res.value.data;
+      }
+    });
+    setProductUnitsMap(unitsMap);
+  };
 
   // Fetch held orders
   const fetchHeldOrders = useCallback(async () => {
@@ -346,11 +376,12 @@ function CashierPosPage() {
     setTaxTotal(discountedTaxTotal);
   }, [cart, discount]);
 
-  // Handle barcode scan
+  // Handle barcode scan (manual input)
   const handleBarcodeScan = async (e) => {
     if (e.key === "Enter" && barcode.trim()) {
+      const code = barcode.trim();
       const product = products.find(
-        (p) => p.barcode === barcode || p.code === barcode || p.sku === barcode
+        (p) => p.barcode === code || p.code === code || p.sku === code
       );
       if (product) {
         addToCart(product);
@@ -359,12 +390,12 @@ function CashierPosPage() {
         try {
           const token = localStorage.getItem("token");
           const response = await axios.get(
-            `${import.meta.env.VITE_API_URL}/customers/${barcode}`,
+            `${import.meta.env.VITE_API_URL}/customers/${code}`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
           setCustomer(response.data);
           toast.success(t("customer_added"));
-        } catch (err) {
+        } catch {
           toast.error(t("invalid_barcode"));
         }
       }
@@ -373,43 +404,62 @@ function CashierPosPage() {
     }
   };
 
-  // Add product to cart with tax rates
+  // Add product to cart (checks for units)
   const addToCart = (product) => {
+    const units = productUnitsMap[product.id];
+    if (units && units.length > 1) {
+      setSelectedProductForUnit(product);
+      setIsUnitSelectorOpen(true);
+    } else {
+      addToCartWithUnit(product, units && units.length === 1 ? units[0] : null);
+    }
+  };
+
+  const addToCartWithUnit = (product, unit) => {
+    const unitPrice = unit?.price || product.price;
+    const unitQuantity = unit?.quantity || 1;
     setCart((prev) => {
-      const existing = prev.find((item) => item.id === product.id);
+      const existing = prev.find(
+        (item) => item.id === product.id && item.unit_id === (unit?.id || null)
+      );
       if (existing) {
         return prev.map((item) =>
-          item.id === product.id
+          item.id === product.id && item.unit_id === (unit?.id || null)
             ? { ...item, quantity: item.quantity + 1 }
             : item
         );
       }
+      cartItemIdRef.current += 1;
       return [
         ...prev,
         {
+          cartItemId: cartItemIdRef.current,
           id: product.id,
           name: product.name,
-          price: product.price,
+          price: parseFloat(unitPrice),
           quantity: 1,
           discount: 0,
           image_url: product.image_url,
           tax_rates: product.tax_rates || [],
+          unit_id: unit?.id || null,
+          unit_name: unit?.name || null,
+          unit_quantity: unitQuantity,
         },
       ];
     });
   };
 
   // Remove item from cart
-  const removeItem = (id) => {
-    setCart(cart.filter((item) => item.id !== id));
+  const removeItem = (cartItemId) => {
+    setCart(cart.filter((item) => item.cartItemId !== cartItemId));
     toast.success(t("item_removed"));
   };
 
   // Update quantity
-  const updateQuantity = (id, qty) => {
+  const updateQuantity = (cartItemId, qty) => {
     setCart(
       cart.map((item) =>
-        item.id === id
+        item.cartItemId === cartItemId
           ? { ...item, quantity: Math.max(1, parseInt(qty) || 1) }
           : item
       )
@@ -417,10 +467,10 @@ function CashierPosPage() {
   };
 
   // Update item discount
-  const updateDiscount = (id, disc) => {
+  const updateDiscount = (cartItemId, disc) => {
     setCart(
       cart.map((item) =>
-        item.id === id
+        item.cartItemId === cartItemId
           ? {
               ...item,
               discount: Math.min(100, Math.max(0, parseFloat(disc) || 0)),
@@ -617,7 +667,6 @@ function CashierPosPage() {
   // Construct image URL
   const getImageUrl = (imageUrl) => {
     if (!imageUrl || typeof imageUrl !== "string") {
-      console.warn(`Image URL is invalid: ${imageUrl}`);
       return PLACEHOLDER_IMAGE;
     }
     if (imageUrl.startsWith("http")) {
@@ -766,11 +815,40 @@ function CashierPosPage() {
               onChange={(e) => setBarcode(e.target.value)}
               onKeyDown={handleBarcodeScan}
               placeholder={t("scan_barcode_placeholder")}
-              className="w-full pl-10 sm:pl-12 pr-4 py-2 sm:py-3 border border-gray-300 rounded-md bg-gray-50 dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-xs sm:text-base"
+              className="w-full pl-10 sm:pl-12 pr-10 py-2 sm:py-3 border border-gray-300 rounded-md bg-gray-50 dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-xs sm:text-base"
               aria-label={t("scan_barcode")}
               autoFocus
             />
+            <button
+              onClick={() => setIsCameraOpen(true)}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+              title={t("scan_with_camera")}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                <circle cx="12" cy="13" r="4"/>
+              </svg>
+            </button>
           </div>
+
+          {isCameraOpen && (
+            <CameraScanner
+              onDetected={(code) => {
+                setIsCameraOpen(false);
+                const product = products.find(
+                  (p) => p.barcode === code || p.code === code || p.sku === code
+                );
+                if (product) {
+                  addToCart(product);
+                  toast.success(t("item_added"));
+                } else {
+                  toast.error(t("invalid_barcode"));
+                }
+                barcodeInputRef.current?.focus();
+              }}
+              onClose={() => setIsCameraOpen(false)}
+            />
+          )}
 
           {/* Search and Category Filters */}
           <div className="flex flex-col gap-3 sm:flex-row sm:gap-4 mb-4 sm:mb-6">
@@ -924,16 +1002,21 @@ function CashierPosPage() {
                     );
                     return (
                       <div
-                        key={item.id}
+                        key={item.cartItemId}
                         className="grid grid-cols-2 sm:grid-cols-8 gap-3 sm:gap-4 items-center p-3 sm:p-4 border-b dark:border-gray-700"
                       >
                         <div className="col-span-1 text-xs sm:text-sm font-medium text-gray-800 dark:text-white truncate">
                           {item.name}
+                          {item.unit_name && (
+                            <span className="ml-1 text-xs text-gray-400">
+                              ({item.unit_name})
+                            </span>
+                          )}
                           <button
-                            onClick={() => toggleItemDetails(item.id)}
+                            onClick={() => toggleItemDetails(item.cartItemId)}
                             className="sm:hidden text-gray-500 dark:text-gray-400 ml-2"
                             aria-label={t(
-                              expandedItems[item.id]
+                              expandedItems[item.cartItemId]
                                 ? "hide_details"
                                 : "show_details",
                               {
@@ -941,7 +1024,7 @@ function CashierPosPage() {
                               }
                             )}
                           >
-                            {expandedItems[item.id] ? (
+                            {expandedItems[item.cartItemId] ? (
                               <ChevronUpIcon className="h-4 w-4" />
                             ) : (
                               <ChevronDownIcon className="h-4 w-4" />
@@ -950,7 +1033,7 @@ function CashierPosPage() {
                         </div>
                         <div className="col-span-1">
                           <button
-                            onClick={() => removeItem(item.id)}
+                            onClick={() => removeItem(item.cartItemId)}
                             className="text-red-500 hover:text-red-600"
                             aria-label={t("remove_from_cart", {
                               name: item.name,
@@ -961,7 +1044,7 @@ function CashierPosPage() {
                         </div>
                         <div
                           className={`sm:col-span-6 col-span-2 ${
-                            expandedItems[item.id] ? "block" : "hidden sm:grid"
+                            expandedItems[item.cartItemId] ? "block" : "hidden sm:grid"
                           } grid grid-cols-2 sm:grid-cols-6 gap-3 sm:gap-4 items-center`}
                         >
                           <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
@@ -970,7 +1053,7 @@ function CashierPosPage() {
                           <div className="col-span-2 flex gap-2">
                             <button
                               onClick={() =>
-                                updateQuantity(item.id, item.quantity - 1)
+                                updateQuantity(item.cartItemId, item.quantity - 1)
                               }
                               className="bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white w-6 sm:w-8 h-6 sm:h-8 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
                               aria-label={t("decrease_quantity", {
@@ -983,7 +1066,7 @@ function CashierPosPage() {
                               type="number"
                               value={item.quantity}
                               onChange={(e) =>
-                                updateQuantity(item.id, e.target.value)
+                                updateQuantity(item.cartItemId, e.target.value)
                               }
                               className="w-12 sm:w-16 p-1 border border-gray-300 rounded-md text-center bg-gray-50 dark:bg-gray-700 dark:text-white text-xs sm:text-sm"
                               min="1"
@@ -991,7 +1074,7 @@ function CashierPosPage() {
                             />
                             <button
                               onClick={() =>
-                                updateQuantity(item.id, item.quantity + 1)
+                                updateQuantity(item.cartItemId, item.quantity + 1)
                               }
                               className="bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white w-6 sm:w-8 h-6 sm:h-8 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
                               aria-label={t("increase_quantity", {
@@ -1006,7 +1089,7 @@ function CashierPosPage() {
                               type="number"
                               value={item.discount}
                               onChange={(e) =>
-                                updateDiscount(item.id, e.target.value)
+                                updateDiscount(item.cartItemId, e.target.value)
                               }
                               placeholder="Disc %"
                               className="w-16 sm:w-20 p-1 border border-gray-300 rounded-md text-xs sm:text-sm bg-gray-50 dark:bg-gray-700 dark:text-white"
@@ -1176,6 +1259,86 @@ function CashierPosPage() {
                 aria-label={t("add")}
               >
                 {t("add")}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+
+      {/* Unit Selector Modal */}
+      <Transition
+        show={isUnitSelectorOpen}
+        enter="transition ease-out duration-300"
+        enterFrom="opacity-0 scale-95"
+        enterTo="opacity-100 scale-100"
+        leave="transition ease-in duration-200"
+        leaveFrom="opacity-100 scale-100"
+        leaveTo="opacity-0 scale-95"
+        as="div"
+      >
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3 sm:p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-3 sm:p-6 w-full max-w-full sm:max-w-sm">
+            <div className="flex justify-between items-center mb-4 sm:mb-6">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-800 dark:text-white">
+                {t("select_unit")}
+              </h3>
+              <button
+                onClick={() => {
+                  setIsUnitSelectorOpen(false);
+                  setSelectedProductForUnit(null);
+                }}
+                className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                aria-label={t("close")}
+              >
+                <XMarkIcon className="h-5 sm:h-6 w-5 sm:w-6" />
+              </button>
+            </div>
+            {selectedProductForUnit && (
+              <div className="mb-4">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  {selectedProductForUnit.name}
+                </p>
+                {productUnitsMap[selectedProductForUnit.id]?.map((unit) => (
+                  <button
+                    key={unit.id}
+                    onClick={() => {
+                      addToCartWithUnit(selectedProductForUnit, unit);
+                      setIsUnitSelectorOpen(false);
+                      setSelectedProductForUnit(null);
+                      toast.success(t("item_added"));
+                    }}
+                    className="w-full text-left p-3 border rounded-lg mb-2 hover:bg-indigo-50 dark:hover:bg-indigo-900 transition-colors"
+                  >
+                    <div className="font-medium text-gray-800 dark:text-white">
+                      {unit.name}
+                      {unit.is_base && (
+                        <span className="ml-2 text-xs text-gray-400">
+                          ({t("default")})
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-sm text-indigo-600 dark:text-indigo-400">
+                      {(unit.price || selectedProductForUnit.price).toFixed(2)} MMK
+                      {unit.quantity > 1 && (
+                        <span className="text-gray-400 ml-2">
+                          {unit.quantity}x
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end">
+              <button
+                onClick={() => {
+                  setIsUnitSelectorOpen(false);
+                  setSelectedProductForUnit(null);
+                }}
+                className="px-3 sm:px-4 py-2 bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 text-xs sm:text-sm"
+                aria-label={t("cancel")}
+              >
+                {t("cancel")}
               </button>
             </div>
           </div>

@@ -10,6 +10,7 @@ import AdminNavbar from "../components/AdminNavbar";
 import OrderHistory from "../components/OrderHistory";
 import CustomerManagement from "../components/CustomerManagement";
 import ProductManagement from "../components/ProductManagement";
+import CategoryManagement from "../components/CategoryManagement";
 import PreparationOrders from "../components/PreparationOrders";
 import UserManagement from "../components/UserManagement";
 import ShopManagement from "../components/ShopManagement";
@@ -176,6 +177,13 @@ function AdminDashboardPage() {
       roles: ["admin", "shop_owner"],
     },
     {
+      id: "categories",
+      label: t("category_management"),
+      icon: <FiPackage className="mr-2" />,
+      component: <CategoryManagement />,
+      roles: ["admin", "shop_owner"],
+    },
+    {
       id: "preparation",
       label: t("preparation_orders"),
       icon: <FiClipboard className="mr-2" />,
@@ -187,7 +195,7 @@ function AdminDashboardPage() {
       label: t("user_management"),
       icon: <FiUser className="mr-2" />,
       component: <UserManagement />,
-      roles: ["admin"], // Restrict to admin role only
+      roles: ["admin", "shop_owner"],
     },
     {
       id: "shops",

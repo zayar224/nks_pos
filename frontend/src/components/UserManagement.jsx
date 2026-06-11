@@ -180,7 +180,8 @@ function UserManagementPage() {
     }
   };
 
-  const isAdmin = currentUser?.role === "admin";
+  const canManageUsers =
+    currentUser?.role === "admin" || currentUser?.role === "shop_owner";
 
   if (loading)
     return (
@@ -200,7 +201,7 @@ function UserManagementPage() {
     <div className="bg-white rounded-lg shadow-md p-6">
       <h1 className="text-2xl font-bold text-gray-800 mb-6">{t("users")}</h1>
 
-      {isAdmin && (
+      {canManageUsers && (
         <form
           onSubmit={handleAddUser}
           className="mb-8 bg-gray-50 p-4 rounded-lg"
@@ -269,18 +270,22 @@ function UserManagementPage() {
               </label>
               <div className="relative">
                 <FiKey className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <select
-                  value={newUser.role}
-                  onChange={(e) =>
-                    setNewUser({ ...newUser, role: e.target.value })
-                  }
-                  className="w-full pl-10 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                >
-                  <option value="cashier">{t("cashier")}</option>
-                  <option value="manager">{t("manager")}</option>
-                  <option value="admin">{t("admin")}</option>
-                  <option value="shop_owner">{t("shop_owner")}</option>
-                </select>
+                  <select
+                    value={newUser.role}
+                    onChange={(e) =>
+                      setNewUser({ ...newUser, role: e.target.value })
+                    }
+                    className="w-full pl-10 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="cashier">{t("cashier")}</option>
+                    <option value="manager">{t("manager")}</option>
+                    {currentUser?.role === "admin" && (
+                      <>
+                        <option value="admin">{t("admin")}</option>
+                        <option value="shop_owner">{t("shop_owner")}</option>
+                      </>
+                    )}
+                  </select>
               </div>
             </div>
 
@@ -352,7 +357,7 @@ function UserManagementPage() {
         </form>
       )}
 
-      {editUser && isAdmin && (
+      {editUser && canManageUsers && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex justify-center items-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
             <h2 className="text-xl font-bold mb-4">{t("edit_user")}</h2>
@@ -411,8 +416,12 @@ function UserManagementPage() {
                     >
                       <option value="cashier">{t("cashier")}</option>
                       <option value="manager">{t("manager")}</option>
-                      <option value="admin">{t("admin")}</option>
-                      <option value="shop_owner">{t("shop_owner")}</option>
+                      {currentUser?.role === "admin" && (
+                        <>
+                          <option value="admin">{t("admin")}</option>
+                          <option value="shop_owner">{t("shop_owner")}</option>
+                        </>
+                      )}
                     </select>
                   </div>
                 </div>
@@ -540,7 +549,7 @@ function UserManagementPage() {
                     {user.branch_id || "N/A"}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 flex gap-2">
-                    {isAdmin && (
+                    {canManageUsers && (
                       <>
                         <button
                           onClick={() => handleEditUser(user)}

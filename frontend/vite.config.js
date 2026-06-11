@@ -6,4 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   darkMode: "class",
+  optimizeDeps: {
+    exclude: ["@ericblade/quagga2"],
+  },
 });

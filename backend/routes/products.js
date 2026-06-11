@@ -840,4 +840,131 @@ function generateBarcode() {
   return `${timestamp}-${random}`.toUpperCase();
 }
 
+// ============================================================
+// Product Units CRUD
+// ============================================================
+
+// Get all units for a product
+router.get("/:id/units", authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [product] = await pool.query(
+      "SELECT id FROM products WHERE id = ? AND shop_id = ?",
+      [id, req.user.shop_id]
+    );
+    if (product.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    const [units] = await pool.query(
+      "SELECT * FROM product_units WHERE product_id = ? ORDER BY is_base DESC, id ASC",
+      [id]
+    );
+    res.json(units.map(u => ({ ...u, price: u.price ? parseFloat(u.price) : null })));
+  } catch (error) {
+    console.error("Error fetching product units:", error);
+    res.status(500).json({ error: "Failed to fetch product units" });
+  }
+});
+
+// Create a unit for a product
+router.post("/:id/units", authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { name, quantity, price, is_base } = req.body;
+  if (!name) {
+    return res.status(400).json({ error: "Unit name is required" });
+  }
+  try {
+    const [product] = await pool.query(
+      "SELECT id FROM products WHERE id = ? AND shop_id = ?",
+      [id, req.user.shop_id]
+    );
+    if (product.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    if (is_base) {
+      await pool.query(
+        "UPDATE product_units SET is_base = 0 WHERE product_id = ?",
+        [id]
+      );
+    }
+    const [result] = await pool.query(
+      "INSERT INTO product_units (product_id, name, quantity, price, is_base) VALUES (?, ?, ?, ?, ?)",
+      [id, name, quantity || 1, price || null, is_base ? 1 : 0]
+    );
+    const [unit] = await pool.query(
+      "SELECT * FROM product_units WHERE id = ?",
+      [result.insertId]
+    );
+    res.json({ ...unit[0], price: unit[0].price ? parseFloat(unit[0].price) : null });
+  } catch (error) {
+    console.error("Error creating product unit:", error);
+    res.status(500).json({ error: "Failed to create product unit" });
+  }
+});
+
+// Update a unit
+router.put("/:id/units/:unitId", authMiddleware, async (req, res) => {
+  const { id, unitId } = req.params;
+  const { name, quantity, price, is_base } = req.body;
+  try {
+    const [product] = await pool.query(
+      "SELECT id FROM products WHERE id = ? AND shop_id = ?",
+      [id, req.user.shop_id]
+    );
+    if (product.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    if (is_base) {
+      await pool.query(
+        "UPDATE product_units SET is_base = 0 WHERE product_id = ? AND id != ?",
+        [id, unitId]
+      );
+    }
+    const [result] = await pool.query(
+      "UPDATE product_units SET name = COALESCE(?, name), quantity = COALESCE(?, quantity), price = ?, is_base = COALESCE(?, is_base) WHERE id = ? AND product_id = ?",
+      [name || null, quantity || null, price !== undefined ? price : null, is_base !== undefined ? (is_base ? 1 : 0) : null, unitId, id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Unit not found" });
+    }
+    const [unit] = await pool.query(
+      "SELECT * FROM product_units WHERE id = ?",
+      [unitId]
+    );
+    res.json({ ...unit[0], price: unit[0].price ? parseFloat(unit[0].price) : null });
+  } catch (error) {
+    console.error("Error updating product unit:", error);
+    res.status(500).json({ error: "Failed to update product unit" });
+  }
+});
+
+// Delete a unit
+router.delete("/:id/units/:unitId", authMiddleware, async (req, res) => {
+  const { id, unitId } = req.params;
+  try {
+    const [product] = await pool.query(
+      "SELECT id FROM products WHERE id = ? AND shop_id = ?",
+      [id, req.user.shop_id]
+    );
+    if (product.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    const [unit] = await pool.query(
+      "SELECT is_base FROM product_units WHERE id = ? AND product_id = ?",
+      [unitId, id]
+    );
+    if (unit.length === 0) {
+      return res.status(404).json({ error: "Unit not found" });
+    }
+    if (unit[0].is_base) {
+      return res.status(400).json({ error: "Cannot delete the base unit" });
+    }
+    await pool.query("DELETE FROM product_units WHERE id = ? AND product_id = ?", [unitId, id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting product unit:", error);
+    res.status(500).json({ error: "Failed to delete product unit" });
+  }
+});
+
 export default router;

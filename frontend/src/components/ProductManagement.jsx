@@ -19,6 +19,7 @@ import {
   FiPrinter,
   FiRefreshCw,
   FiPercent,
+  FiLayers,
 } from "react-icons/fi";
 
 function ProductManagement() {
@@ -45,6 +46,10 @@ function ProductManagement() {
   });
   const [newTaxRate, setNewTaxRate] = useState({ name: "", rate: "" });
   const [imagePreview, setImagePreview] = useState(null);
+  const [productUnits, setProductUnits] = useState([]);
+  const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
+  const [editUnit, setEditUnit] = useState(null);
+  const [newUnit, setNewUnit] = useState({ name: "", quantity: 1, price: "", is_base: false });
 
   useEffect(() => {
     const fetchData = async () => {
@@ -297,35 +302,35 @@ function ProductManagement() {
       const response = await axios.get(`/products/${productId}/barcode-image`, {
         responseType: "blob",
       });
-      const url = window.URL.createObjectURL(
-        new Blob([response.data], { type: "image/png" })
-      );
-      const printWindow = window.open("");
-      if (printWindow) {
-        printWindow.document.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <title>Print Barcode</title>
-            <style>
-              body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-              img { max-width: 100%; max-height: 100%; }
-            </style>
-          </head>
-          <body>
-            <img src="${url}" onload="window.print();window.close();" onerror="window.close();alert('Failed to load barcode image.');">
-          </body>
-          </html>
-        `);
-        printWindow.document.close();
-      } else {
-        toast.error(t("popup_blocked"));
-      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        const printWindow = window.open("");
+        if (printWindow) {
+          printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Print Barcode</title>
+              <style>
+                body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                img { max-width: 100%; max-height: 100%; }
+              </style>
+            </head>
+            <body>
+              <img src="${dataUrl}" onload="window.print();window.onafterprint=function(){window.close();};" onerror="window.close();alert('Failed to load barcode image.');">
+            </body>
+            </html>
+          `);
+          printWindow.document.close();
+        } else {
+          toast.error(t("popup_blocked"));
+        }
+      };
+      reader.readAsDataURL(response.data);
     } catch (err) {
       console.error("Failed to generate barcode image:", err);
       toast.error(t("failed_to_generate_barcode"));
-    } finally {
-      setTimeout(() => window.URL.revokeObjectURL(url), 100);
     }
   };
 
@@ -341,6 +346,71 @@ function ProductManagement() {
       toast.success(t("tax_rate_removed"));
     } catch (err) {
       toast.error(t("failed_to_remove_tax_rate"));
+    }
+  };
+
+  const openUnitModal = async (product) => {
+    try {
+      const res = await axios.get(`/products/${product.id}/units`);
+      setProductUnits(res.data);
+      setEditUnit(null);
+      setNewUnit({ name: "", quantity: 1, price: "", is_base: false });
+      setIsUnitModalOpen(true);
+    } catch (err) {
+      toast.error(t("failed_to_fetch_units"));
+    }
+  };
+
+  const handleAddOrUpdateUnit = async () => {
+    if (!newUnit.name) {
+      toast.error(t("unit_name_required"));
+      return;
+    }
+    try {
+      if (editUnit) {
+        const res = await axios.put(
+          `/products/${editProduct.id}/units/${editUnit.id}`,
+          newUnit
+        );
+        setProductUnits(
+          productUnits.map((u) => (u.id === editUnit.id ? res.data : u))
+        );
+        toast.success(t("unit_updated"));
+      } else {
+        const res = await axios.post(
+          `/products/${editProduct.id}/units`,
+          newUnit
+        );
+        setProductUnits([...productUnits, res.data]);
+        toast.success(t("unit_added"));
+      }
+      setEditUnit(null);
+      setNewUnit({ name: "", quantity: 1, price: "", is_base: false });
+    } catch (err) {
+      const msg = err.response?.data?.error || t("failed_to_save_unit");
+      toast.error(msg);
+    }
+  };
+
+  const handleEditUnit = (unit) => {
+    setEditUnit(unit);
+    setNewUnit({
+      name: unit.name,
+      quantity: unit.quantity,
+      price: unit.price ? unit.price.toString() : "",
+      is_base: unit.is_base,
+    });
+  };
+
+  const handleDeleteUnit = async (unitId) => {
+    if (!confirm(t("confirm_delete_unit"))) return;
+    try {
+      await axios.delete(`/products/${editProduct.id}/units/${unitId}`);
+      setProductUnits(productUnits.filter((u) => u.id !== unitId));
+      toast.success(t("unit_deleted"));
+    } catch (err) {
+      const msg = err.response?.data?.error || t("failed_to_delete_unit");
+      toast.error(msg);
     }
   };
 
@@ -432,6 +502,9 @@ function ProductManagement() {
                     {t("weighted")}
                   </th>
                   <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {t("units")}
+                  </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {t("actions")}
                   </th>
                 </tr>
@@ -480,6 +553,17 @@ function ProductManagement() {
                       ) : (
                         <FiX className="text-red-500 mx-auto" />
                       )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                      <button
+                        onClick={() => openUnitModal(product)}
+                        className="text-indigo-600 hover:text-indigo-900 flex items-center justify-center mx-auto"
+                        disabled={isLoading}
+                        title={t("manage_units")}
+                      >
+                        <FiLayers className="mr-1" />
+                        {t("units")}
+                      </button>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
                       <div className="flex justify-center space-x-2">
@@ -919,6 +1003,131 @@ function ProductManagement() {
                 <FiPrinter className="mr-2" />
                 {t("print_barcode")}
               </button>
+            </div>
+          </Dialog.Panel>
+        </div>
+      </Dialog>
+
+      {/* Unit Management Modal */}
+      <Dialog
+        open={isUnitModalOpen}
+        onClose={() => setIsUnitModalOpen(false)}
+        className="relative z-50"
+      >
+        <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
+        <div className="fixed inset-0 flex items-center justify-center p-4">
+          <Dialog.Panel className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <Dialog.Title className="text-xl font-bold text-gray-800">
+                {t("manage_units")}
+              </Dialog.Title>
+              <button
+                onClick={() => setIsUnitModalOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <FiX className="h-6 w-6" />
+              </button>
+            </div>
+
+            {/* Existing Units */}
+            {productUnits.length > 0 && (
+              <div className="mb-4">
+                <h4 className="font-medium text-gray-700 mb-2">{t("existing_units")}</h4>
+                {productUnits.map((unit) => (
+                  <div
+                    key={unit.id}
+                    className="flex items-center justify-between p-2 border-b border-gray-100"
+                  >
+                    <div>
+                      <span className="font-medium">{unit.name}</span>
+                      {unit.is_base && (
+                        <span className="ml-2 text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">
+                          {t("base")}
+                        </span>
+                      )}
+                      <div className="text-sm text-gray-500">
+                        {unit.quantity > 1 && `${unit.quantity}x `}
+                        {unit.price ? `${parseFloat(unit.price).toFixed(2)} MMK` : t("uses_product_price")}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleEditUnit(unit)}
+                        className="text-indigo-600 hover:text-indigo-900"
+                      >
+                        <FiEdit />
+                      </button>
+                      {!unit.is_base && (
+                        <button
+                          onClick={() => handleDeleteUnit(unit.id)}
+                          className="text-red-600 hover:text-red-900"
+                        >
+                          <FiTrash2 />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Add/Edit Unit Form */}
+            <div className="border-t pt-4">
+              <h4 className="font-medium text-gray-700 mb-2">
+                {editUnit ? t("edit_unit") : t("add_unit")}
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">{t("unit_name")}</label>
+                  <input
+                    type="text"
+                    value={newUnit.name}
+                    onChange={(e) => setNewUnit({ ...newUnit, name: e.target.value })}
+                    placeholder="e.g. 6 Pack, Case, Bottle"
+                    className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">{t("quantity_multiplier")}</label>
+                  <input
+                    type="number"
+                    value={newUnit.quantity}
+                    onChange={(e) => setNewUnit({ ...newUnit, quantity: parseInt(e.target.value) || 1 })}
+                    min="1"
+                    className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">{t("quantity_multiplier_hint")}</p>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">{t("unit_price")}</label>
+                  <input
+                    type="number"
+                    value={newUnit.price}
+                    onChange={(e) => setNewUnit({ ...newUnit, price: e.target.value })}
+                    placeholder={t("leave_empty_for_default")}
+                    min="0"
+                    step="0.01"
+                    className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">{t("unit_price_hint")}</p>
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={newUnit.is_base}
+                    onChange={(e) => setNewUnit({ ...newUnit, is_base: e.target.checked })}
+                    className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                  />
+                  <label className="ml-2 text-sm text-gray-700">{t("is_base_unit")}</label>
+                </div>
+                <button
+                  onClick={handleAddOrUpdateUnit}
+                  className="w-full flex justify-center items-center bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md transition-colors"
+                >
+                  <FiCheck className="mr-2" />
+                  {editUnit ? t("update_unit") : t("add_unit")}
+                </button>
+              </div>
             </div>
           </Dialog.Panel>
         </div>

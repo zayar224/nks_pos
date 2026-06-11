@@ -3,6 +3,8 @@ import express from "express";
 import pool from "../db.js";
 import { authMiddleware } from "./auth.js";
 
+const router = express.Router();
+
 router.get("/currencies", authMiddleware, async (req, res) => {
   try {
     const [currencies] = await pool.query(
@@ -52,3 +54,5 @@ router.post("/payment-methods", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Failed to add payment method" });
   }
 });
+
+export default router;

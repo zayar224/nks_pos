@@ -1,4 +1,5 @@
 import { openDB } from "idb";
+import axios from "axios";
 
 const dbPromise = openDB("KernexPosDB", 1, {
   upgrade(db) {

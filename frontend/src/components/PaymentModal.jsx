@@ -115,6 +115,8 @@ function PaymentModal({
           discount: item.discount || 0,
           price: item.price,
           tax_rates: item.tax_rates || [],
+          unit_id: item.unit_id || null,
+          unit_quantity: item.unit_quantity || 1,
         })),
         customer_id: customer?.id || null,
         discount,

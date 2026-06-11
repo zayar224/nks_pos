@@ -1,9 +1,18 @@
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import rateLimit from "express-rate-limit";
 import pool from "../db.js";
 
 const router = express.Router();
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: "Too many login attempts. Try again in 15 minutes." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // Middleware to verify JWT
 export const authMiddleware = async (req, res, next) => {
@@ -32,7 +41,7 @@ export const authMiddleware = async (req, res, next) => {
 };
 
 // Login
-router.post("/login", async (req, res) => {
+router.post("/login", loginLimiter, async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return res
@@ -90,16 +99,20 @@ router.post("/logout", authMiddleware, async (req, res) => {
   }
 });
 
-// Get all users (admin only)
+// Get all users (admin or shop_owner)
 router.get("/users", authMiddleware, async (req, res) => {
-  if (req.user.role !== "admin") {
+  if (req.user.role !== "admin" && req.user.role !== "shop_owner") {
     return res.status(403).json({ error: "Forbidden" });
   }
   try {
-    const [users] = await pool.query(
-      "SELECT id, username, email, role, shop_id, branch_id FROM users WHERE shop_id = ?",
-      [req.user.shop_id]
-    );
+    let query = "SELECT id, username, email, role, shop_id, branch_id FROM users WHERE shop_id = ?";
+    const params = [req.user.shop_id];
+    // Shop owners can only see cashier users (and themselves)
+    if (req.user.role === "shop_owner") {
+      query += " AND (role = ? OR id = ?)";
+      params.push("cashier", req.user.id);
+    }
+    const [users] = await pool.query(query, params);
     res.json(users);
   } catch (error) {
     console.error("Get users error:", error);
@@ -107,9 +120,9 @@ router.get("/users", authMiddleware, async (req, res) => {
   }
 });
 
-// Create user (admin only)
+// Create user (admin or shop_owner)
 router.post("/users", authMiddleware, async (req, res) => {
-  if (req.user.role !== "admin") {
+  if (req.user.role !== "admin" && req.user.role !== "shop_owner") {
     return res.status(403).json({ error: "Forbidden" });
   }
   const { username, email, password, role, shop_id, branch_id } = req.body;
@@ -117,6 +130,10 @@ router.post("/users", authMiddleware, async (req, res) => {
     return res
       .status(400)
       .json({ error: "Username, email, password, and role are required" });
+  }
+  // Shop owners can only create cashier users
+  if (req.user.role === "shop_owner" && role !== "cashier") {
+    return res.status(403).json({ error: "Shop owners can only create cashier users" });
   }
   const finalShopId = shop_id || req.user.shop_id;
   try {
@@ -145,10 +162,20 @@ router.post("/users", authMiddleware, async (req, res) => {
   }
 });
 
-// Update user (admin only)
+// Update user (admin or shop_owner)
 router.put("/users/:id", authMiddleware, async (req, res) => {
-  if (req.user.role !== "admin") {
+  if (req.user.role !== "admin" && req.user.role !== "shop_owner") {
     return res.status(403).json({ error: "Forbidden" });
+  }
+  // Shop owners can only update cashier users
+  if (req.user.role === "shop_owner") {
+    const [target] = await pool.query(
+      "SELECT role FROM users WHERE id = ? AND shop_id = ?",
+      [req.params.id, req.user.shop_id]
+    );
+    if (!target[0] || target[0].role !== "cashier") {
+      return res.status(403).json({ error: "Shop owners can only manage cashier users" });
+    }
   }
   const { id } = req.params;
   const { username, email, role, shop_id, branch_id } = req.body;
@@ -205,10 +232,20 @@ router.put("/users/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// Delete user (admin only)
+// Delete user (admin or shop_owner)
 router.delete("/users/:id", authMiddleware, async (req, res) => {
-  if (req.user.role !== "admin") {
+  if (req.user.role !== "admin" && req.user.role !== "shop_owner") {
     return res.status(403).json({ error: "Forbidden" });
+  }
+  // Shop owners can only delete cashier users
+  if (req.user.role === "shop_owner") {
+    const [target] = await pool.query(
+      "SELECT role FROM users WHERE id = ? AND shop_id = ?",
+      [req.params.id, req.user.shop_id]
+    );
+    if (!target[0] || target[0].role !== "cashier") {
+      return res.status(403).json({ error: "Shop owners can only manage cashier users" });
+    }
   }
   const { id } = req.params;
   try {
