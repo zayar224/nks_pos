@@ -25,7 +25,20 @@ router.get("/", authMiddleware, async (req, res) => {
       "SELECT * FROM stores WHERE branch_id = ?",
       [req.user.branch_id]
     );
-    res.json(rows);
+    if (rows.length === 0) {
+      // If no stores, return branches as stores
+      const [branches] = await pool.query(
+        "SELECT id, name FROM branches WHERE id = ?",
+        [req.user.branch_id]
+      );
+      res.json(branches.map(branch => ({
+        id: branch.id,
+        name: branch.name,
+        branch_id: branch.id
+      })));
+    } else {
+      res.json(rows);
+    }
   } catch (error) {
     console.error("Stores error:", error);
     res.status(500).json({ error: "Failed to fetch stores" });

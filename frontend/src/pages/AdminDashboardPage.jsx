@@ -20,6 +20,7 @@ import LoyaltyTiersPage from "./LoyaltyTiersPage";
 import EmployeeAttendancePage from "./EmployeeAttendancePage";
 import AuditLogsPage from "./AuditLogsPage";
 import StockTransfersPage from "./StockTransfersPage";
+import CategoryUnitsManager from "../components/CategoryUnitsManager";
 import { Bar } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -60,7 +61,7 @@ ChartJS.register(
   LinearScale,
   Title,
   Tooltip,
-  Legend
+  Legend,
 );
 
 function AdminDashboardPage() {
@@ -76,10 +77,11 @@ function AdminDashboardPage() {
   const [error, setError] = useState("");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [period, setPeriod] = useState("day");
+  const [categories, setCategories] = useState([]);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
+    const fetchData = async () => {
       try {
         const token = localStorage.getItem("token");
         if (!token) {
@@ -88,34 +90,37 @@ function AdminDashboardPage() {
           );
         }
         const config = { headers: { Authorization: `Bearer ${token}` } };
-        const response = await axios.get(
-          `/orders/stats?period=${period}`,
-          config
-        );
+        const [dashboardRes, categoriesRes] = await Promise.all([
+          axios.get(`/orders/stats?period=${period}`, config),
+          axios.get("/products/categories", config),
+        ]);
         setDashboardData({
-          totalSales: parseFloat(response.data.totalSales) || 0,
-          orderCount: parseInt(response.data.orderCount, 10) || 0,
-          salesData: response.data.salesData || [],
+          totalSales: parseFloat(dashboardRes.data.totalSales) || 0,
+          orderCount: parseInt(dashboardRes.data.orderCount, 10) || 0,
+          salesData: dashboardRes.data.salesData || [],
         });
+        setCategories(categoriesRes.data);
         setError("");
       } catch (err) {
         const errorMessage =
           err.response?.status === 404
             ? t("dashboard_endpoint_not_found")
             : err.response?.status === 401
-            ? t("unauthorized_access")
-            : err.response?.status === 403
-            ? t("no_access_to_shop_data")
-            : !err.response?.data || response.data.salesData?.length === 0
-            ? t("no_data_available")
-            : err.message || t("failed_to_fetch_dashboard");
+              ? t("unauthorized_access")
+              : err.response?.status === 403
+                ? t("no_access_to_shop_data")
+                : !err.response?.data ||
+                    (err.response?.data?.salesData?.length === 0 &&
+                      !err.response?.data?.length)
+                  ? t("no_data_available")
+                  : err.message || t("failed_to_fetch_dashboard");
         setError(errorMessage);
-        console.error("Dashboard fetch error:", err);
+        console.error("Fetch error:", err);
       } finally {
         setLoading(false);
       }
     };
-    fetchDashboardData();
+    fetchData();
   }, [t, period]);
 
   if (loading) {
@@ -181,6 +186,13 @@ function AdminDashboardPage() {
       label: t("category_management"),
       icon: <FiPackage className="mr-2" />,
       component: <CategoryManagement />,
+      roles: ["admin", "shop_owner"],
+    },
+    {
+      id: "category_units",
+      label: "Category Units",
+      icon: <FiPackage className="mr-2" />,
+      component: <CategoryUnitsManager categories={categories} />,
       roles: ["admin", "shop_owner"],
     },
     {
@@ -375,7 +387,7 @@ function DashboardContent({ data, period, setPeriod }) {
         {
           label: t("sales"),
           data: data.salesData.map((row) =>
-            typeof row.totalSales === "number" ? row.totalSales : 0
+            typeof row.totalSales === "number" ? row.totalSales : 0,
           ),
           backgroundColor: "#6366f1",
           borderColor: "#4f46e5",

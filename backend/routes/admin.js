@@ -201,9 +201,13 @@ router.get("/employee-attendance", authMiddleware, async (req, res) => {
 });
 
 router.post("/employee-attendance", authMiddleware, async (req, res) => {
-  const { user_id, branch_id, clock_in } = req.body;
+  const { clock_in, user_id, branch_id } = req.body;
+  // Use user from token if not provided in body
+  const finalUserId = user_id || req.user.id;
+  const finalBranchId = branch_id || req.user.branch_id;
+  
   // console.log("POST /api/employee-attendance request body:", req.body);
-  if (!user_id || !branch_id || !clock_in) {
+  if (!finalUserId || !finalBranchId || !clock_in) {
     return res
       .status(400)
       .json({ error: "User ID, Branch ID, and Clock In are required" });
@@ -219,7 +223,7 @@ router.post("/employee-attendance", authMiddleware, async (req, res) => {
       .replace("T", " ");
     const [result] = await pool.query(
       "INSERT INTO employee_attendance (user_id, branch_id, clock_in) VALUES (?, ?, ?)",
-      [user_id, branch_id, formattedClockIn]
+      [finalUserId, finalBranchId, formattedClockIn]
     );
     res
       .status(201)

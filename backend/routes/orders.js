@@ -10,7 +10,7 @@ const router = express.Router();
 async function logStatusChange(connection, orderId, status, userId) {
   await connection.query(
     "INSERT INTO order_status_logs (order_id, status, changed_by) VALUES (?, ?, ?)",
-    [orderId, status, userId]
+    [orderId, status, userId],
   );
 }
 
@@ -97,10 +97,6 @@ router.post("/", authMiddleware, async (req, res) => {
   ) {
     return res.status(403).json({ error: "Invalid branch ID" });
   }
-  if (!store_id) {
-    return res.status(400).json({ error: "Store ID is required" });
-  }
-
   const maxRetries = 3;
   let attempt = 0;
 
@@ -109,20 +105,38 @@ router.post("/", authMiddleware, async (req, res) => {
     try {
       await connection.beginTransaction();
 
-      // Validate store
-      let storeQuery = "SELECT id, branch_id FROM stores WHERE id = ?";
-      let storeParams = [store_id];
-      if (req.user.role === "admin" || req.user.role === "shop_owner") {
-        storeQuery +=
-          " AND branch_id IN (SELECT id FROM branches WHERE shop_id = ?)";
-        storeParams.push(req.user.shop_id);
-      } else {
-        storeQuery += " AND branch_id = ?";
-        storeParams.push(req.user.branch_id);
-      }
-      const [store] = await connection.query(storeQuery, storeParams);
-      if (!store[0]) {
-        throw new Error("Invalid store ID or unauthorized access");
+      // Validate store only if store_id is provided
+      let effectiveStoreId = store_id;
+      if (store_id) {
+        let storeQuery = "SELECT id, branch_id FROM stores WHERE id = ?";
+        let storeParams = [store_id];
+        if (req.user.role === "admin" || req.user.role === "shop_owner") {
+          storeQuery +=
+            " AND branch_id IN (SELECT id FROM branches WHERE shop_id = ?)";
+          storeParams.push(req.user.shop_id);
+        } else {
+          storeQuery += " AND branch_id = ?";
+          storeParams.push(req.user.branch_id);
+        }
+        const [store] = await connection.query(storeQuery, storeParams);
+        if (!store[0]) {
+          // If store not found, check if it's a branch ID
+          let branchQuery = "SELECT id FROM branches WHERE id = ?";
+          let branchParams = [store_id];
+          if (req.user.role === "admin" || req.user.role === "shop_owner") {
+            branchQuery += " AND shop_id = ?";
+            branchParams.push(req.user.shop_id);
+          } else {
+            branchQuery += " AND id = ?";
+            branchParams.push(req.user.branch_id);
+          }
+          const [branch] = await connection.query(branchQuery, branchParams);
+          if (!branch[0]) {
+            throw new Error("Invalid store ID or unauthorized access");
+          }
+          // It's a branch, so set effectiveStoreId to NULL
+          effectiveStoreId = null;
+        }
       }
 
       // Validate products and stock (skip for pending orders)
@@ -130,7 +144,7 @@ router.post("/", authMiddleware, async (req, res) => {
         const productIds = items.map((item) => item.id);
         const [products] = await connection.query(
           "SELECT id, stock, price FROM products WHERE id IN (?) AND shop_id = ?",
-          [productIds, req.user.shop_id]
+          [productIds, req.user.shop_id],
         );
 
         for (const item of items) {
@@ -153,7 +167,7 @@ router.post("/", authMiddleware, async (req, res) => {
       // Validate currency
       const [currency] = await connection.query(
         "SELECT exchange_rate FROM currencies WHERE id = ?",
-        [currency_id]
+        [currency_id],
       );
       if (!currency[0]) {
         throw new Error("Invalid currency ID");
@@ -164,7 +178,7 @@ router.post("/", authMiddleware, async (req, res) => {
       let subtotal = items.reduce(
         (sum, item) =>
           sum + item.price * item.quantity * (1 - (item.discount || 0) / 100),
-        0
+        0,
       );
       subtotal = subtotal * exchangeRate;
 
@@ -175,7 +189,7 @@ router.post("/", authMiddleware, async (req, res) => {
           taxRates.reduce(
             (taxSum, rate) =>
               taxSum + (item.price * item.quantity * rate) / 100,
-            0
+            0,
           )
         );
       }, 0);
@@ -188,7 +202,7 @@ router.post("/", authMiddleware, async (req, res) => {
       if (status !== "pending" && customer_id && use_loyalty_points > 0) {
         const [customer] = await connection.query(
           "SELECT loyalty_points FROM customers WHERE id = ? AND shop_id = ?",
-          [customer_id, req.user.shop_id]
+          [customer_id, req.user.shop_id],
         );
         if (!customer[0]) {
           throw new Error("Invalid customer ID or unauthorized");
@@ -196,12 +210,12 @@ router.post("/", authMiddleware, async (req, res) => {
         pointsUsed = Math.min(
           use_loyalty_points,
           customer[0].loyalty_points,
-          total * 100
+          total * 100,
         );
         total -= pointsUsed * 0.01;
         await connection.query(
           "UPDATE customers SET loyalty_points = loyalty_points - ? WHERE id = ?",
-          [pointsUsed, customer_id]
+          [pointsUsed, customer_id],
         );
       }
 
@@ -210,7 +224,7 @@ router.post("/", authMiddleware, async (req, res) => {
       if (status !== "pending" && customer_id && req.body.ewallet_amount > 0) {
         const [customer] = await connection.query(
           "SELECT ewallet_balance FROM customers WHERE id = ? AND shop_id = ?",
-          [customer_id, req.user.shop_id]
+          [customer_id, req.user.shop_id],
         );
         if (!customer[0]) {
           throw new Error("Invalid customer ID or unauthorized");
@@ -218,12 +232,12 @@ router.post("/", authMiddleware, async (req, res) => {
         ewalletUsed = Math.min(
           req.body.ewallet_amount,
           customer[0].ewallet_balance,
-          total
+          total,
         );
         total -= ewalletUsed;
         await connection.query(
           "UPDATE customers SET ewallet_balance = ewallet_balance - ? WHERE id = ?",
-          [ewalletUsed, customer_id]
+          [ewalletUsed, customer_id],
         );
       }
 
@@ -231,7 +245,7 @@ router.post("/", authMiddleware, async (req, res) => {
       if (status !== "pending") {
         const totalPaid = payment_methods.reduce(
           (sum, pm) => sum + parseFloat(pm.amount || 0),
-          0
+          0,
         );
         if (totalPaid + ewalletUsed < total) {
           throw new Error("Payment amounts do not cover total");
@@ -247,13 +261,13 @@ router.post("/", authMiddleware, async (req, res) => {
           customer_id || null,
           discount,
           currency_id,
-          store_id,
+          effectiveStoreId,
           branch_id,
           status,
           is_online,
           pickup_time || null,
           effectiveTaxTotal,
-        ]
+        ],
       );
       const orderId = result.insertId;
 
@@ -269,13 +283,13 @@ router.post("/", authMiddleware, async (req, res) => {
             total,
             customer_id,
             discount,
-            store_id,
+            store_id: effectiveStoreId,
             branch_id,
             status,
             is_online,
           }),
           req.user.shop_id,
-        ]
+        ],
       );
 
       // Log status
@@ -294,12 +308,12 @@ router.post("/", authMiddleware, async (req, res) => {
             item.quantity,
             item.discount || 0,
             item.customer_note || null,
-          ]
+          ],
         );
         if (status !== "pending") {
           await connection.query(
             "UPDATE products SET stock = stock - ? WHERE id = ?",
-            [stockDeduction, item.id]
+            [stockDeduction, item.id],
           );
         }
       }
@@ -309,7 +323,7 @@ router.post("/", authMiddleware, async (req, res) => {
         for (const pm of payment_methods) {
           await connection.query(
             "INSERT INTO order_payments (order_id, payment_method_id, amount) VALUES (?, ?, ?)",
-            [orderId, pm.payment_method_id, pm.amount]
+            [orderId, pm.payment_method_id, pm.amount],
           );
         }
       }
@@ -319,7 +333,7 @@ router.post("/", authMiddleware, async (req, res) => {
         const pointsEarned = Math.floor(total);
         await connection.query(
           "UPDATE customers SET loyalty_points = loyalty_points + ? WHERE id = ?",
-          [pointsEarned, customer_id]
+          [pointsEarned, customer_id],
         );
       }
 
@@ -332,7 +346,7 @@ router.post("/", authMiddleware, async (req, res) => {
         console.warn(
           `Retrying order creation for user ${req.user.id}, attempt ${
             attempt + 1
-          }`
+          }`,
         );
         await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
         continue;
@@ -480,8 +494,8 @@ router.get("/history", authMiddleware, async (req, res) => {
         cur.code AS currency_code
       FROM orders o
       LEFT JOIN customers c ON o.customer_id = c.id
-      JOIN stores s ON o.store_id = s.id
-      JOIN branches b ON s.branch_id = b.id
+      LEFT JOIN stores s ON o.store_id = s.id
+      LEFT JOIN branches b ON s.branch_id = b.id OR (o.store_id IS NULL AND b.id = o.branch_id)
       JOIN currencies cur ON o.currency_id = cur.id
       WHERE 1=1
     `;
@@ -511,8 +525,8 @@ router.get("/history", authMiddleware, async (req, res) => {
     const countQuery = `
       SELECT COUNT(*) as total
       FROM orders o
-      JOIN stores s ON o.store_id = s.id
-      JOIN branches b ON s.branch_id = b.id
+      LEFT JOIN stores s ON o.store_id = s.id
+      LEFT JOIN branches b ON s.branch_id = b.id OR (o.store_id IS NULL AND b.id = o.branch_id)
       WHERE 1=1
       ${
         req.user.role === "admin" || req.user.role === "shop_owner"
@@ -587,13 +601,13 @@ router.post("/refund", authMiddleware, async (req, res) => {
     const orderTotal = parseFloat(order[0].total);
     if (parseFloat(amount) > orderTotal) {
       throw new Error(
-        `Refund amount (${amount}) exceeds order total (${orderTotal})`
+        `Refund amount (${amount}) exceeds order total (${orderTotal})`,
       );
     }
 
     await connection.query(
       "INSERT INTO refunds (order_id, amount, reason) VALUES (?, ?, ?)",
-      [order_id, parseFloat(amount), reason]
+      [order_id, parseFloat(amount), reason],
     );
 
     // Log to audit_logs
@@ -606,26 +620,26 @@ router.post("/refund", authMiddleware, async (req, res) => {
         "refund",
         JSON.stringify({ amount, reason, refund_to_ewallet }),
         req.user.shop_id,
-      ]
+      ],
     );
 
     if (refund_to_ewallet && order[0].customer_id) {
       const [customer] = await connection.query(
         "SELECT id FROM customers WHERE id = ? AND shop_id = ?",
-        [order[0].customer_id, req.user.shop_id]
+        [order[0].customer_id, req.user.shop_id],
       );
       if (!customer[0]) {
         throw new Error("Customer not found or unauthorized");
       }
       await connection.query(
         "UPDATE customers SET ewallet_balance = ewallet_balance + ? WHERE id = ?",
-        [parseFloat(amount), order[0].customer_id]
+        [parseFloat(amount), order[0].customer_id],
       );
     }
 
     await connection.query(
       "UPDATE orders SET status = 'cancelled', is_refunded = TRUE WHERE id = ?",
-      [order_id]
+      [order_id],
     );
     await logStatusChange(connection, order_id, "cancelled", req.user.id);
 
@@ -634,13 +648,13 @@ router.post("/refund", authMiddleware, async (req, res) => {
        FROM order_items oi
        LEFT JOIN product_units pu ON oi.unit_id = pu.id
        WHERE oi.order_id = ?`,
-      [order_id]
+      [order_id],
     );
     for (const item of items) {
       const stockRestore = item.quantity * item.unit_quantity;
       await connection.query(
         "UPDATE products SET stock = stock + ? WHERE id = ?",
-        [stockRestore, item.product_id]
+        [stockRestore, item.product_id],
       );
     }
 
@@ -648,7 +662,7 @@ router.post("/refund", authMiddleware, async (req, res) => {
       const pointsDeducted = Math.floor(parseFloat(amount));
       await connection.query(
         "UPDATE customers SET loyalty_points = GREATEST(loyalty_points - ?, 0) WHERE id = ? AND shop_id = ?",
-        [pointsDeducted, order[0].customer_id, req.user.shop_id]
+        [pointsDeducted, order[0].customer_id, req.user.shop_id],
       );
     }
 
@@ -680,7 +694,7 @@ router.get("/preparation", authMiddleware, async (req, res) => {
       SELECT o.*, c.name AS customer_name, s.name AS store_name
       FROM orders o
       LEFT JOIN customers c ON o.customer_id = c.id
-      JOIN stores s ON o.store_id = s.id
+      LEFT JOIN stores s ON o.store_id = s.id
     `;
     let params = [];
 
@@ -848,12 +862,12 @@ router.post("/:orderId/complete", authMiddleware, async (req, res) => {
         "status_update",
         JSON.stringify({ status: "prepared" }),
         req.user.shop_id,
-      ]
+      ],
     );
 
     const [updatedOrder] = await connection.query(
-      "SELECT o.*, c.name AS customer_name, s.name AS store_name FROM orders o LEFT JOIN customers c ON o.customer_id = c.id JOIN stores s ON o.store_id = s.id WHERE o.id = ?",
-      [orderId]
+      "SELECT o.*, c.name AS customer_name, s.name AS store_name FROM orders o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN stores s ON o.store_id = s.id WHERE o.id = ?",
+      [orderId],
     );
 
     await connection.commit();
@@ -905,13 +919,13 @@ router.post("/:orderId/pickup", authMiddleware, async (req, res) => {
       }
       if (orders[0].status !== "prepared" || !orders[0].is_online) {
         throw new Error(
-          `Order not eligible for pickup (status: ${orders[0].status})`
+          `Order not eligible for pickup (status: ${orders[0].status})`,
         );
       }
 
       const [result] = await connection.query(
         "UPDATE orders SET status = ? WHERE id = ?",
-        ["completed", orderId]
+        ["completed", orderId],
       );
       if (result.affectedRows === 0) {
         throw new Error("Failed to update order status");
@@ -929,12 +943,12 @@ router.post("/:orderId/pickup", authMiddleware, async (req, res) => {
           "status_update",
           JSON.stringify({ status: "completed" }),
           req.user.shop_id,
-        ]
+        ],
       );
 
       const [updatedOrder] = await connection.query(
-        "SELECT o.*, c.name AS customer_name, s.name AS store_name FROM orders o LEFT JOIN customers c ON o.customer_id = c.id JOIN stores s ON o.store_id = s.id WHERE o.id = ?",
-        [orderId]
+        "SELECT o.*, c.name AS customer_name, s.name AS store_name FROM orders o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN stores s ON o.store_id = s.id WHERE o.id = ?",
+        [orderId],
       );
 
       await connection.commit();
@@ -944,7 +958,7 @@ router.post("/:orderId/pickup", authMiddleware, async (req, res) => {
       if (error.code === "ER_LOCK_WAIT_TIMEOUT" && attempt < maxRetries - 1) {
         attempt++;
         console.warn(
-          `Retrying /pickup for order ${orderId}, attempt ${attempt + 1}`
+          `Retrying /pickup for order ${orderId}, attempt ${attempt + 1}`,
         );
         await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
         continue;
@@ -994,11 +1008,11 @@ router.delete("/:orderId", authMiddleware, async (req, res) => {
     // Restrict deletion to pending, preparing, or prepared orders
     if (
       !["pending", "preparing", "prepared", "cancelled"].includes(
-        order[0].status
+        order[0].status,
       )
     ) {
       throw new Error(
-        `Order is not eligible for deletion (current status: ${order[0].status})`
+        `Order is not eligible for deletion (current status: ${order[0].status})`,
       );
     }
 
@@ -1008,13 +1022,13 @@ router.delete("/:orderId", authMiddleware, async (req, res) => {
        FROM order_items oi
        LEFT JOIN product_units pu ON oi.unit_id = pu.id
        WHERE oi.order_id = ?`,
-      [orderId]
+      [orderId],
     );
     for (const item of items) {
       const stockRestore = item.quantity * item.unit_quantity;
       await connection.query(
         "UPDATE products SET stock = stock + ? WHERE id = ?",
-        [stockRestore, item.product_id]
+        [stockRestore, item.product_id],
       );
     }
 
@@ -1023,7 +1037,7 @@ router.delete("/:orderId", authMiddleware, async (req, res) => {
       const pointsDeducted = Math.floor(parseFloat(order[0].total));
       await connection.query(
         "UPDATE customers SET loyalty_points = GREATEST(loyalty_points - ?, 0) WHERE id = ? AND shop_id = ?",
-        [pointsDeducted, order[0].customer_id, req.user.shop_id]
+        [pointsDeducted, order[0].customer_id, req.user.shop_id],
       );
     }
 
@@ -1040,14 +1054,14 @@ router.delete("/:orderId", authMiddleware, async (req, res) => {
         "delete",
         JSON.stringify({ reason: reason || null }),
         req.user.shop_id, // Add shop_id from req.user
-      ]
+      ],
     );
 
     // Log to order_audit_logs (if reason is provided)
     if (reason) {
       await connection.query(
         "INSERT INTO order_audit_logs (order_id, action, reason, user_id) VALUES (?, ?, ?, ?)",
-        [orderId, "delete", reason, req.user.id]
+        [orderId, "delete", reason, req.user.id],
       );
     }
 
@@ -1123,11 +1137,11 @@ router.get("/stats", authMiddleware, async (req, res) => {
     const response = {
       totalSales: results.reduce(
         (sum, row) => sum + (parseFloat(row.totalSales) || 0),
-        0
+        0,
       ),
       orderCount: results.reduce(
         (sum, row) => sum + (parseInt(row.orderCount, 10) || 0),
-        0
+        0,
       ),
       salesData: results.map((row) => ({
         salesDate: row.salesDate,
@@ -1175,7 +1189,7 @@ router.post("/:orderId/cancel", authMiddleware, async (req, res) => {
     if (!order[0]) {
       const [existingOrder] = await connection.query(
         "SELECT status, branch_id FROM orders WHERE id = ?",
-        [orderId]
+        [orderId],
       );
       if (!existingOrder[0]) {
         throw new Error("Order not found");
@@ -1188,13 +1202,13 @@ router.post("/:orderId/cancel", authMiddleware, async (req, res) => {
         throw new Error("Order belongs to a different branch");
       }
       throw new Error(
-        `Order is not eligible for cancellation (current status: ${existingOrder[0].status})`
+        `Order is not eligible for cancellation (current status: ${existingOrder[0].status})`,
       );
     }
 
     await connection.query(
       "UPDATE orders SET status = 'cancelled' WHERE id = ?",
-      [orderId]
+      [orderId],
     );
     await logStatusChange(connection, orderId, "cancelled", req.user.id);
 
@@ -1208,7 +1222,7 @@ router.post("/:orderId/cancel", authMiddleware, async (req, res) => {
         "cancel",
         JSON.stringify({ reason: reason || null }),
         req.user.shop_id,
-      ]
+      ],
     );
 
     const [items] = await connection.query(
@@ -1216,13 +1230,13 @@ router.post("/:orderId/cancel", authMiddleware, async (req, res) => {
        FROM order_items oi
        LEFT JOIN product_units pu ON oi.unit_id = pu.id
        WHERE oi.order_id = ?`,
-      [orderId]
+      [orderId],
     );
     for (const item of items) {
       const stockRestore = item.quantity * item.unit_quantity;
       await connection.query(
         "UPDATE products SET stock = stock + ? WHERE id = ?",
-        [stockRestore, item.product_id]
+        [stockRestore, item.product_id],
       );
     }
 
@@ -1230,20 +1244,20 @@ router.post("/:orderId/cancel", authMiddleware, async (req, res) => {
       const pointsDeducted = Math.floor(order[0].total);
       await connection.query(
         "UPDATE customers SET loyalty_points = GREATEST(loyalty_points - ?, 0) WHERE id = ? AND shop_id = ?",
-        [pointsDeducted, order[0].customer_id, req.user.shop_id]
+        [pointsDeducted, order[0].customer_id, req.user.shop_id],
       );
     }
 
     if (reason) {
       await connection.query(
         "INSERT INTO refunds (order_id, amount, reason) VALUES (?, ?, ?)",
-        [orderId, order[0].total, reason]
+        [orderId, order[0].total, reason],
       );
     }
 
     const [updatedOrder] = await connection.query(
-      "SELECT o.*, c.name AS customer_name, s.name AS store_name FROM orders o LEFT JOIN customers c ON o.customer_id = c.id JOIN stores s ON o.store_id = s.id WHERE o.id = ?",
-      [orderId]
+      "SELECT o.*, c.name AS customer_name, s.name AS store_name FROM orders o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN stores s ON o.store_id = s.id WHERE o.id = ?",
+      [orderId],
     );
 
     await connection.commit();
@@ -1265,7 +1279,7 @@ router.get("/pending", authMiddleware, async (req, res) => {
       SELECT o.*, c.name AS customer_name, s.name AS store_name
       FROM orders o
       LEFT JOIN customers c ON o.customer_id = c.id
-      JOIN stores s ON o.store_id = s.id
+      LEFT JOIN stores s ON o.store_id = s.id
       WHERE o.status = 'pending'
     `;
     let params = [];
@@ -1292,7 +1306,7 @@ router.get("/pending", authMiddleware, async (req, res) => {
           LEFT JOIN categories c ON p.category_id = c.id
           WHERE oi.order_id = ?
         `,
-          [order.id]
+          [order.id],
         );
         const parsedItems = items.map((item) => ({
           ...item,
@@ -1307,7 +1321,7 @@ router.get("/pending", authMiddleware, async (req, res) => {
             : null,
         }));
         return { ...parseOrder(order, []), items: parsedItems };
-      })
+      }),
     );
 
     res.json(parsedOrders);
@@ -1362,7 +1376,7 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
           "status_update",
           JSON.stringify({ status }),
           req.user.shop_id,
-        ]
+        ],
       );
 
       await logStatusChange(connection, id, status, req.user.id);
@@ -1412,11 +1426,11 @@ router.get("/report/ordertotal", authMiddleware, async (req, res) => {
 
     res.json({
       total_sales: parseFloat(
-        orders.length > 0 ? orders[0].total_sales || 0 : 0
+        orders.length > 0 ? orders[0].total_sales || 0 : 0,
       ),
       order_count: parseInt(
         orders.length > 0 ? orders[0].order_count || 0 : 0,
-        10
+        10,
       ),
     });
   } catch (error) {
@@ -1470,7 +1484,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
       LEFT JOIN categories c ON p.category_id = c.id
       WHERE oi.order_id = ?
     `,
-      [id]
+      [id],
     );
     const parsedItems = items.map((item) => ({
       ...item,

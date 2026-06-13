@@ -86,11 +86,6 @@ function PaymentModal({
       setIsSubmitting(false);
       return;
     }
-    if (!selectedStore) {
-      setError("Please select a store");
-      setIsSubmitting(false);
-      return;
-    }
 
     const branchId = user?.branch_id;
     if (!branchId) {
@@ -124,7 +119,7 @@ function PaymentModal({
         payment_methods: payments,
         ewallet_amount: ewalletAmount || 0,
         use_loyalty_points: loyaltyPoints || 0,
-        store_id: selectedStore,
+        store_id: selectedStore || null,
         is_online: false,
         branch_id: branchId,
       };

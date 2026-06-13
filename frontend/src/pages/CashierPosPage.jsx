@@ -52,7 +52,7 @@ function CashierPosPage() {
       dateStyle: "medium",
       timeStyle: "short",
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    })
+    }),
   );
   const [loading, setLoading] = useState({
     stores: true,
@@ -86,7 +86,7 @@ function CashierPosPage() {
           dateStyle: "medium",
           timeStyle: "short",
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        })
+        }),
       );
     };
     updateClock(); // Initial call
@@ -120,7 +120,7 @@ function CashierPosPage() {
       const config = { headers: { Authorization: `Bearer ${token}` } };
       await axios.get(
         `${import.meta.env.VITE_API_URL}/auth/validate-session`,
-        config
+        config,
       );
     } catch (err) {
       console.error("Session validation error:", err);
@@ -158,7 +158,7 @@ function CashierPosPage() {
       const config = { headers: { Authorization: `Bearer ${token}` } };
       const response = await axios.get(
         `${import.meta.env.VITE_API_URL}/stores`,
-        config
+        config,
       );
       setStores(response.data);
       if (
@@ -170,7 +170,7 @@ function CashierPosPage() {
       } else if (response.data.length > 0) {
         setSelectedStore(
           response.data.find((s) => s.branch_id === user.branch_id)?.id ||
-            response.data[0].id
+            response.data[0].id,
         );
       }
     } catch (err) {
@@ -188,7 +188,7 @@ function CashierPosPage() {
       const config = { headers: { Authorization: `Bearer ${token}` } };
       const response = await axios.get(
         `${import.meta.env.VITE_API_URL}/products`,
-        config
+        config,
       );
       setProducts(response.data);
       setFilteredProducts(response.data);
@@ -211,14 +211,18 @@ function CashierPosPage() {
       products.map((product) =>
         axios.get(
           `${import.meta.env.VITE_API_URL}/products/${product.id}/units`,
-          config
-        )
-      )
+          config,
+        ),
+      ),
     );
     const unitsMap = {};
     products.forEach((product, i) => {
       const res = results[i];
-      if (res.status === "fulfilled" && res.value.data && res.value.data.length > 0) {
+      if (
+        res.status === "fulfilled" &&
+        res.value.data &&
+        res.value.data.length > 0
+      ) {
         unitsMap[product.id] = res.value.data;
       }
     });
@@ -233,11 +237,11 @@ function CashierPosPage() {
       const config = { headers: { Authorization: `Bearer ${token}` } };
       const response = await axios.get(
         `${import.meta.env.VITE_API_URL}/orders/pending`,
-        config
+        config,
       );
       const cancellableOrders = response.data.filter(
         (order) =>
-          order.status === "pending" && order.branch_id === user.branch_id
+          order.status === "pending" && order.branch_id === user.branch_id,
       );
       setHeldOrders(cancellableOrders);
     } catch (err) {
@@ -258,7 +262,7 @@ function CashierPosPage() {
         `${import.meta.env.VITE_API_URL}/employee-attendance?user_id=${
           user.id
         }`,
-        config
+        config,
       );
 
       // Find the latest open attendance record (no clock_out)
@@ -287,11 +291,9 @@ function CashierPosPage() {
       const response = await axios.post(
         `${import.meta.env.VITE_API_URL}/employee-attendance`,
         {
-          user_id: user.id,
-          branch_id: user.branch_id,
           clock_in: new Date().toISOString(),
         },
-        config
+        config,
       );
       setAttendance({
         id: response.data.id,
@@ -324,7 +326,7 @@ function CashierPosPage() {
         {
           clock_out: new Date().toISOString(),
         },
-        config
+        config,
       );
       setAttendance(null);
       toast.success(t("clocked_out"));
@@ -345,7 +347,7 @@ function CashierPosPage() {
           p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           p.barcode?.includes(searchQuery) ||
           p.code?.includes(searchQuery) ||
-          p.sku?.includes(searchQuery)
+          p.sku?.includes(searchQuery),
       );
     }
     if (selectedCategory !== "all") {
@@ -359,7 +361,7 @@ function CashierPosPage() {
     const subtotal = cart.reduce(
       (sum, item) =>
         sum + item.price * item.quantity * (1 - (item.discount || 0) / 100),
-      0
+      0,
     );
     const newTaxTotal = cart.reduce((sum, item) => {
       const taxRates = item.tax_rates || [];
@@ -381,7 +383,7 @@ function CashierPosPage() {
     if (e.key === "Enter" && barcode.trim()) {
       const code = barcode.trim();
       const product = products.find(
-        (p) => p.barcode === code || p.code === code || p.sku === code
+        (p) => p.barcode === code || p.code === code || p.sku === code,
       );
       if (product) {
         addToCart(product);
@@ -391,7 +393,7 @@ function CashierPosPage() {
           const token = localStorage.getItem("token");
           const response = await axios.get(
             `${import.meta.env.VITE_API_URL}/customers/${code}`,
-            { headers: { Authorization: `Bearer ${token}` } }
+            { headers: { Authorization: `Bearer ${token}` } },
           );
           setCustomer(response.data);
           toast.success(t("customer_added"));
@@ -420,13 +422,13 @@ function CashierPosPage() {
     const unitQuantity = unit?.quantity || 1;
     setCart((prev) => {
       const existing = prev.find(
-        (item) => item.id === product.id && item.unit_id === (unit?.id || null)
+        (item) => item.id === product.id && item.unit_id === (unit?.id || null),
       );
       if (existing) {
         return prev.map((item) =>
           item.id === product.id && item.unit_id === (unit?.id || null)
             ? { ...item, quantity: item.quantity + 1 }
-            : item
+            : item,
         );
       }
       cartItemIdRef.current += 1;
@@ -461,8 +463,8 @@ function CashierPosPage() {
       cart.map((item) =>
         item.cartItemId === cartItemId
           ? { ...item, quantity: Math.max(1, parseInt(qty) || 1) }
-          : item
-      )
+          : item,
+      ),
     );
   };
 
@@ -475,8 +477,8 @@ function CashierPosPage() {
               ...item,
               discount: Math.min(100, Math.max(0, parseFloat(disc) || 0)),
             }
-          : item
-      )
+          : item,
+      ),
     );
   };
 
@@ -495,10 +497,6 @@ function CashierPosPage() {
       toast.error(t("cart_empty"));
       return;
     }
-    if (!selectedStore) {
-      toast.warn(t("select_store"));
-      return;
-    }
     try {
       const token = localStorage.getItem("token");
       const response = await axios.post(
@@ -508,11 +506,11 @@ function CashierPosPage() {
           customer_id: customer?.id || null,
           discount,
           tax_total: taxTotal,
-          store_id: selectedStore,
+          store_id: selectedStore || null,
           branch_id: user.branch_id,
           status: "pending",
         },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       setCart([]);
       setDiscount(0);
@@ -534,7 +532,7 @@ function CashierPosPage() {
         `${import.meta.env.VITE_API_URL}/orders/${orderId}`,
         {
           headers: { Authorization: `Bearer ${token}` },
-        }
+        },
       );
       const order = response.data;
       setCart(
@@ -546,14 +544,14 @@ function CashierPosPage() {
           discount: item.discount || 0,
           image_url: item.image_url,
           tax_rates: item.tax_rates || [],
-        }))
+        })),
       );
       setDiscount(order.discount || 0);
       setTaxTotal(parseFloat(order.tax_total || 0));
       setCustomer(
         order.customer_id
           ? { id: order.customer_id, name: order.customer_name }
-          : null
+          : null,
       );
       setSelectedStore(order.store_id);
       setIsHeldOrdersOpen(false);
@@ -575,7 +573,7 @@ function CashierPosPage() {
       const response = await axios.post(
         `${import.meta.env.VITE_API_URL}/orders/${orderId}/cancel`,
         { reason: "Cancelled by cashier" },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       await fetchHeldOrders();
       toast.success(t("order_cancelled"));
@@ -598,10 +596,7 @@ function CashierPosPage() {
       toast.error(t("cart_empty"));
       return;
     }
-    if (!selectedStore) {
-      toast.warn(t("select_store"));
-      return;
-    }
+    // If no stores are available, we can still proceed
     setIsPaymentOpen(true);
   };
 
@@ -624,7 +619,7 @@ function CashierPosPage() {
       await axios.post(
         `${import.meta.env.VITE_API_URL}/auth/logout`,
         {},
-        config
+        config,
       );
       logout();
       localStorage.removeItem("token");
@@ -654,7 +649,7 @@ function CashierPosPage() {
       const token = localStorage.getItem("token");
       const response = await axios.get(
         `${import.meta.env.VITE_API_URL}/customers/${barcode}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
       setCustomer(response.data);
       setIsCustomerModalOpen(false);
@@ -824,9 +819,18 @@ function CashierPosPage() {
               className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
               title={t("scan_with_camera")}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                <circle cx="12" cy="13" r="4"/>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
               </svg>
             </button>
           </div>
@@ -836,7 +840,8 @@ function CashierPosPage() {
               onDetected={(code) => {
                 setIsCameraOpen(false);
                 const product = products.find(
-                  (p) => p.barcode === code || p.code === code || p.sku === code
+                  (p) =>
+                    p.barcode === code || p.code === code || p.sku === code,
                 );
                 if (product) {
                   addToCart(product);
@@ -909,10 +914,10 @@ function CashierPosPage() {
                     className="w-full h-20 sm:h-24 object-cover rounded-md mb-2 sm:mb-3"
                     onError={(e) => {
                       console.error(
-                        `Failed to load image for ${product.name}: ${e.target.src}`
+                        `Failed to load image for ${product.name}: ${e.target.src}`,
                       );
                       toast.error(
-                        t("failed_to_load_image", { name: product.name })
+                        t("failed_to_load_image", { name: product.name }),
                       );
                       e.target.src = PLACEHOLDER_IMAGE;
                     }}
@@ -998,7 +1003,7 @@ function CashierPosPage() {
                       (1 - (item.discount || 0) / 100);
                     const itemTax = item.tax_rates.reduce(
                       (sum, rate) => sum + (itemSubtotal * rate) / 100,
-                      0
+                      0,
                     );
                     return (
                       <div
@@ -1021,7 +1026,7 @@ function CashierPosPage() {
                                 : "show_details",
                               {
                                 name: item.name,
-                              }
+                              },
                             )}
                           >
                             {expandedItems[item.cartItemId] ? (
@@ -1044,7 +1049,9 @@ function CashierPosPage() {
                         </div>
                         <div
                           className={`sm:col-span-6 col-span-2 ${
-                            expandedItems[item.cartItemId] ? "block" : "hidden sm:grid"
+                            expandedItems[item.cartItemId]
+                              ? "block"
+                              : "hidden sm:grid"
                           } grid grid-cols-2 sm:grid-cols-6 gap-3 sm:gap-4 items-center`}
                         >
                           <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
@@ -1053,7 +1060,10 @@ function CashierPosPage() {
                           <div className="col-span-2 flex gap-2">
                             <button
                               onClick={() =>
-                                updateQuantity(item.cartItemId, item.quantity - 1)
+                                updateQuantity(
+                                  item.cartItemId,
+                                  item.quantity - 1,
+                                )
                               }
                               className="bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white w-6 sm:w-8 h-6 sm:h-8 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
                               aria-label={t("decrease_quantity", {
@@ -1074,7 +1084,10 @@ function CashierPosPage() {
                             />
                             <button
                               onClick={() =>
-                                updateQuantity(item.cartItemId, item.quantity + 1)
+                                updateQuantity(
+                                  item.cartItemId,
+                                  item.quantity + 1,
+                                )
                               }
                               className="bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white w-6 sm:w-8 h-6 sm:h-8 rounded-full hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
                               aria-label={t("increase_quantity", {
@@ -1126,7 +1139,7 @@ function CashierPosPage() {
                 value={discount}
                 onChange={(e) =>
                   setDiscount(
-                    Math.min(100, Math.max(0, parseFloat(e.target.value) || 0))
+                    Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)),
                   )
                 }
                 className="w-20 sm:w-24 p-2 border border-gray-300 rounded-md text-right bg-gray-50 dark:bg-gray-700 dark:text-white text-xs sm:text-sm"
@@ -1171,7 +1184,7 @@ function CashierPosPage() {
               <button
                 onClick={holdOrder}
                 className="flex items-center justify-center bg-yellow-500 hover:bg-yellow-600 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-md transition-colors text-xs sm:text-sm disabled:bg-gray-400 disabled:cursor-not-allowed"
-                disabled={cart.length === 0 || !selectedStore}
+                disabled={cart.length === 0}
                 aria-label={t("hold_order")}
               >
                 <PauseIcon className="h-4 sm:h-5 w-4 sm:w-5 mr-2" />
@@ -1180,7 +1193,7 @@ function CashierPosPage() {
               <button
                 onClick={handleCheckout}
                 className="flex items-center justify-center bg-blue-500 hover:bg-blue-600 text-white px-3 sm:px-4 py-2 sm:py-3 rounded-md transition-colors text-xs sm:text-sm disabled:bg-gray-400 disabled:cursor-not-allowed"
-                disabled={cart.length === 0 || !selectedStore}
+                disabled={cart.length === 0}
                 aria-label={t("checkout")}
               >
                 {t("checkout")}
@@ -1318,7 +1331,8 @@ function CashierPosPage() {
                       )}
                     </div>
                     <div className="text-sm text-indigo-600 dark:text-indigo-400">
-                      {(unit.price || selectedProductForUnit.price).toFixed(2)} MMK
+                      {(unit.price || selectedProductForUnit.price).toFixed(2)}{" "}
+                      MMK
                       {unit.quantity > 1 && (
                         <span className="text-gray-400 ml-2">
                           {unit.quantity}x

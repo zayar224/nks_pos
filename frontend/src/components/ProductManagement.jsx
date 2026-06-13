@@ -20,6 +20,7 @@ import {
   FiRefreshCw,
   FiPercent,
   FiLayers,
+  FiAlertTriangle,
 } from "react-icons/fi";
 
 function ProductManagement() {
@@ -47,9 +48,19 @@ function ProductManagement() {
   const [newTaxRate, setNewTaxRate] = useState({ name: "", rate: "" });
   const [imagePreview, setImagePreview] = useState(null);
   const [productUnits, setProductUnits] = useState([]);
+  const [categoryUnits, setCategoryUnits] = useState([]);
   const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
   const [editUnit, setEditUnit] = useState(null);
-  const [newUnit, setNewUnit] = useState({ name: "", quantity: 1, price: "", is_base: false });
+  const [newUnit, setNewUnit] = useState({
+    name: "",
+    quantity: 1,
+    price: "",
+    is_base: false,
+  });
+  const [currentProductIdForUnits, setCurrentProductIdForUnits] =
+    useState(null);
+  const [currentProductCategoryId, setCurrentProductCategoryId] =
+    useState(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -136,7 +147,7 @@ function ProductManagement() {
       if (newProduct.tax_rate_ids) {
         formData.append(
           "tax_rate_ids",
-          JSON.stringify(newProduct.tax_rate_ids)
+          JSON.stringify(newProduct.tax_rate_ids),
         );
       }
 
@@ -146,7 +157,7 @@ function ProductManagement() {
           headers: { "Content-Type": "multipart/form-data" },
         });
         setProducts(
-          products.map((p) => (p.id === editProduct.id ? res.data : p))
+          products.map((p) => (p.id === editProduct.id ? res.data : p)),
         );
         toast.success(t("product_updated"));
       } else {
@@ -200,10 +211,10 @@ function ProductManagement() {
       if (editTaxRate) {
         res = await axios.put(
           `/products/tax-rates/${editTaxRate.id}`,
-          newTaxRate
+          newTaxRate,
         );
         setTaxRates(
-          taxRates.map((t) => (t.id === editTaxRate.id ? res.data : t))
+          taxRates.map((t) => (t.id === editTaxRate.id ? res.data : t)),
         );
         toast.success(t("tax_rate_updated"));
       } else {
@@ -340,7 +351,7 @@ function ProductManagement() {
       await axios.delete(`/products/${productId}/tax-rates/${taxRateId}`);
       const updatedProduct = { ...editProduct };
       updatedProduct.tax_rates = updatedProduct.tax_rates.filter(
-        (rate) => rate !== taxRateId
+        (rate) => rate !== taxRateId,
       );
       setEditProduct(updatedProduct);
       toast.success(t("tax_rate_removed"));
@@ -351,10 +362,35 @@ function ProductManagement() {
 
   const openUnitModal = async (product) => {
     try {
-      const res = await axios.get(`/products/${product.id}/units`);
-      setProductUnits(res.data);
+      const [productUnitsRes, categoryUnitsRes] = await Promise.all([
+        axios.get(`/products/${product.id}/units`),
+        product.category_id
+          ? axios.get(`/products/categories/${product.category_id}/units`)
+          : { data: [] },
+      ]);
+      setCurrentProductIdForUnits(product.id);
+      setCurrentProductCategoryId(product.category_id);
+      setProductUnits(productUnitsRes.data);
+      setCategoryUnits(categoryUnitsRes.data || []);
       setEditUnit(null);
-      setNewUnit({ name: "", quantity: 1, price: "", is_base: false });
+
+      // If no product units exist, check if category has base unit
+      if (productUnitsRes.data.length === 0) {
+        const categoryBaseUnit = categoryUnitsRes.data?.find((u) => u.is_base);
+        if (categoryBaseUnit) {
+          setNewUnit({
+            name: categoryBaseUnit.name,
+            quantity: categoryBaseUnit.quantity,
+            price: "",
+            is_base: true,
+          });
+        } else {
+          setNewUnit({ name: "Base", quantity: 1, price: "", is_base: true });
+        }
+      } else {
+        setNewUnit({ name: "", quantity: 1, price: "", is_base: false });
+      }
+
       setIsUnitModalOpen(true);
     } catch (err) {
       toast.error(t("failed_to_fetch_units"));
@@ -369,17 +405,17 @@ function ProductManagement() {
     try {
       if (editUnit) {
         const res = await axios.put(
-          `/products/${editProduct.id}/units/${editUnit.id}`,
-          newUnit
+          `/products/${currentProductIdForUnits}/units/${editUnit.id}`,
+          newUnit,
         );
         setProductUnits(
-          productUnits.map((u) => (u.id === editUnit.id ? res.data : u))
+          productUnits.map((u) => (u.id === editUnit.id ? res.data : u)),
         );
         toast.success(t("unit_updated"));
       } else {
         const res = await axios.post(
-          `/products/${editProduct.id}/units`,
-          newUnit
+          `/products/${currentProductIdForUnits}/units`,
+          newUnit,
         );
         setProductUnits([...productUnits, res.data]);
         toast.success(t("unit_added"));
@@ -405,12 +441,34 @@ function ProductManagement() {
   const handleDeleteUnit = async (unitId) => {
     if (!confirm(t("confirm_delete_unit"))) return;
     try {
-      await axios.delete(`/products/${editProduct.id}/units/${unitId}`);
+      await axios.delete(
+        `/products/${currentProductIdForUnits}/units/${unitId}`,
+      );
       setProductUnits(productUnits.filter((u) => u.id !== unitId));
       toast.success(t("unit_deleted"));
     } catch (err) {
       const msg = err.response?.data?.error || t("failed_to_delete_unit");
       toast.error(msg);
+    }
+  };
+
+  const handleImportCategoryUnits = async () => {
+    if (!currentProductCategoryId || categoryUnits.length === 0) return;
+    try {
+      const promises = categoryUnits.map((unit) =>
+        axios.post(`/products/${currentProductIdForUnits}/units`, {
+          name: unit.name,
+          quantity: unit.quantity,
+          price: "",
+          is_base: unit.is_base,
+        }),
+      );
+      const results = await Promise.all(promises);
+      const newUnits = results.map((res) => res.data);
+      setProductUnits([...productUnits, ...newUnits]);
+      toast.success("Category units imported!");
+    } catch (err) {
+      toast.error("Failed to import category units");
     }
   };
 
@@ -859,7 +917,7 @@ function ProductManagement() {
                         ...newProduct,
                         tax_rate_ids: Array.from(
                           e.target.selectedOptions,
-                          (option) => option.value
+                          (option) => option.value,
                         ),
                       })
                     }
@@ -1016,8 +1074,8 @@ function ProductManagement() {
       >
         <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
         <div className="fixed inset-0 flex items-center justify-center p-4">
-          <Dialog.Panel className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
+          <Dialog.Panel className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
               <Dialog.Title className="text-xl font-bold text-gray-800">
                 {t("manage_units")}
               </Dialog.Title>
@@ -1029,100 +1087,210 @@ function ProductManagement() {
               </button>
             </div>
 
-            {/* Existing Units */}
-            {productUnits.length > 0 && (
-              <div className="mb-4">
-                <h4 className="font-medium text-gray-700 mb-2">{t("existing_units")}</h4>
-                {productUnits.map((unit) => (
-                  <div
-                    key={unit.id}
-                    className="flex items-center justify-between p-2 border-b border-gray-100"
-                  >
-                    <div>
-                      <span className="font-medium">{unit.name}</span>
-                      {unit.is_base && (
-                        <span className="ml-2 text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">
-                          {t("base")}
-                        </span>
-                      )}
-                      <div className="text-sm text-gray-500">
-                        {unit.quantity > 1 && `${unit.quantity}x `}
-                        {unit.price ? `${parseFloat(unit.price).toFixed(2)} MMK` : t("uses_product_price")}
+            {/* Category Units */}
+            {categoryUnits.length > 0 && (
+              <div className="mb-6">
+                <h4 className="font-semibold text-gray-700 mb-3 flex items-center">
+                  <FiPackage className="mr-2" />
+                  Category Units
+                </h4>
+                <div className="space-y-3">
+                  {categoryUnits.map((unit) => (
+                    <div
+                      key={unit.id}
+                      className={`p-4 rounded-lg border-2 ${unit.is_base ? "border-indigo-200 bg-indigo-50" : "border-gray-200 bg-gray-50"} flex items-center justify-between`}
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center">
+                          <span className="font-semibold text-gray-900">
+                            {unit.name}
+                          </span>
+                          {unit.is_base && (
+                            <span className="ml-2 text-xs font-medium bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full">
+                              {t("base")}
+                            </span>
+                          )}
+                          <span className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full">
+                            From Category
+                          </span>
+                        </div>
+                        <div className="mt-1 text-sm text-gray-600">
+                          {unit.quantity > 1 && (
+                            <span className="mr-3">
+                              × {unit.quantity} {t("base").toLowerCase()}
+                            </span>
+                          )}
+                          <span className="italic">Uses product price</span>
+                        </div>
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleEditUnit(unit)}
-                        className="text-indigo-600 hover:text-indigo-900"
-                      >
-                        <FiEdit />
-                      </button>
-                      {!unit.is_base && (
-                        <button
-                          onClick={() => handleDeleteUnit(unit.id)}
-                          className="text-red-600 hover:text-red-900"
-                        >
-                          <FiTrash2 />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
 
+            {/* Product Units */}
+            <div className="mb-6">
+              <div className="flex justify-between items-center mb-3">
+                <h4 className="font-semibold text-gray-700 flex items-center">
+                  <FiPackage className="mr-2" />
+                  Product Units
+                </h4>
+                {categoryUnits.length > 0 && (
+                  <button
+                    onClick={handleImportCategoryUnits}
+                    className="text-sm flex items-center bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-lg transition-colors"
+                  >
+                    <FiPlus className="mr-1" />
+                    Import Category Units
+                  </button>
+                )}
+              </div>
+              {productUnits.length > 0 ? (
+                <div className="space-y-3">
+                  {productUnits.map((unit) => (
+                    <div
+                      key={unit.id}
+                      className={`p-4 rounded-lg border-2 ${unit.is_base ? "border-indigo-200 bg-indigo-50" : "border-gray-200 bg-gray-50"} flex items-center justify-between`}
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center">
+                          <span className="font-semibold text-gray-900">
+                            {unit.name}
+                          </span>
+                          {unit.is_base && (
+                            <span className="ml-2 text-xs font-medium bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full">
+                              {t("base")}
+                            </span>
+                          )}
+                          <span className="ml-2 text-xs font-medium bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                            Product Specific
+                          </span>
+                        </div>
+                        <div className="mt-1 text-sm text-gray-600">
+                          {unit.quantity > 1 && (
+                            <span className="mr-3">
+                              × {unit.quantity} {t("base").toLowerCase()}
+                            </span>
+                          )}
+                          {unit.price ? (
+                            <span>{parseFloat(unit.price).toFixed(2)} MMK</span>
+                          ) : (
+                            <span className="italic">
+                              {t("uses_product_price")}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 ml-4">
+                        <button
+                          onClick={() => handleEditUnit(unit)}
+                          className="p-2 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors"
+                        >
+                          <FiEdit />
+                        </button>
+                        {!unit.is_base && (
+                          <button
+                            onClick={() => handleDeleteUnit(unit.id)}
+                            className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
+                          >
+                            <FiTrash2 />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-blue-50 border border-blue-200 text-blue-800 p-4 rounded-lg">
+                  <p className="flex items-center">
+                    <FiAlertTriangle className="mr-2" />
+                    No product-specific units. Category units are available.
+                  </p>
+                </div>
+              )}
+            </div>
+
             {/* Add/Edit Unit Form */}
-            <div className="border-t pt-4">
-              <h4 className="font-medium text-gray-700 mb-2">
+            <div className="border-t pt-6">
+              <h4 className="font-semibold text-gray-700 mb-4 flex items-center">
+                {editUnit ? (
+                  <FiEdit className="mr-2" />
+                ) : (
+                  <FiPlus className="mr-2" />
+                )}{" "}
                 {editUnit ? t("edit_unit") : t("add_unit")}
               </h4>
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-sm text-gray-600 mb-1">{t("unit_name")}</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {t("unit_name")}
+                  </label>
                   <input
                     type="text"
                     value={newUnit.name}
-                    onChange={(e) => setNewUnit({ ...newUnit, name: e.target.value })}
-                    placeholder="e.g. 6 Pack, Case, Bottle"
-                    className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+                    onChange={(e) =>
+                      setNewUnit({ ...newUnit, name: e.target.value })
+                    }
+                    placeholder="e.g., Bottle, Case, Pack"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-600 mb-1">{t("quantity_multiplier")}</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {t("quantity_multiplier")}
+                  </label>
                   <input
                     type="number"
                     value={newUnit.quantity}
-                    onChange={(e) => setNewUnit({ ...newUnit, quantity: parseInt(e.target.value) || 1 })}
+                    onChange={(e) =>
+                      setNewUnit({
+                        ...newUnit,
+                        quantity: parseInt(e.target.value) || 1,
+                      })
+                    }
                     min="1"
-                    className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   />
-                  <p className="text-xs text-gray-400 mt-1">{t("quantity_multiplier_hint")}</p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {t("quantity_multiplier_hint")}
+                  </p>
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-600 mb-1">{t("unit_price")}</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {t("unit_price")}
+                  </label>
                   <input
                     type="number"
                     value={newUnit.price}
-                    onChange={(e) => setNewUnit({ ...newUnit, price: e.target.value })}
+                    onChange={(e) =>
+                      setNewUnit({ ...newUnit, price: e.target.value })
+                    }
                     placeholder={t("leave_empty_for_default")}
                     min="0"
                     step="0.01"
-                    className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   />
-                  <p className="text-xs text-gray-400 mt-1">{t("unit_price_hint")}</p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {t("unit_price_hint")}
+                  </p>
                 </div>
                 <div className="flex items-center">
                   <input
                     type="checkbox"
                     checked={newUnit.is_base}
-                    onChange={(e) => setNewUnit({ ...newUnit, is_base: e.target.checked })}
+                    onChange={(e) =>
+                      setNewUnit({ ...newUnit, is_base: e.target.checked })
+                    }
                     className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
                   />
-                  <label className="ml-2 text-sm text-gray-700">{t("is_base_unit")}</label>
+                  <label className="ml-2 block text-sm font-medium text-gray-700">
+                    {t("is_base_unit")}
+                  </label>
                 </div>
                 <button
                   onClick={handleAddOrUpdateUnit}
-                  className="w-full flex justify-center items-center bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md transition-colors"
+                  className="w-full flex justify-center items-center bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-lg font-medium transition-colors"
                 >
                   <FiCheck className="mr-2" />
                   {editUnit ? t("update_unit") : t("add_unit")}

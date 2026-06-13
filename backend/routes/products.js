@@ -554,6 +554,12 @@ router.post(
         }
       }
 
+      // Create default base unit for new product
+      await connection.query(
+        "INSERT INTO product_units (product_id, name, quantity, price, is_base) VALUES (?, 'Base', 1, NULL, 1)",
+        [productId]
+      );
+
       const [newProduct] = await connection.query(
         `
         SELECT p.*, c.name AS category_name,
@@ -964,6 +970,133 @@ router.delete("/:id/units/:unitId", authMiddleware, async (req, res) => {
   } catch (error) {
     console.error("Error deleting product unit:", error);
     res.status(500).json({ error: "Failed to delete product unit" });
+  }
+});
+
+// ============================================================
+// Category Units CRUD
+// ============================================================
+
+// Get all units for a category
+router.get("/categories/:categoryId/units", authMiddleware, async (req, res) => {
+  const { categoryId } = req.params;
+  try {
+    const [category] = await pool.query(
+      "SELECT id FROM categories WHERE id = ? AND shop_id = ?",
+      [categoryId, req.user.shop_id]
+    );
+    if (category.length === 0) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+    const [units] = await pool.query(
+      "SELECT * FROM category_units WHERE category_id = ? ORDER BY is_base DESC, id ASC",
+      [categoryId]
+    );
+    res.json(units);
+  } catch (error) {
+    console.error("Error fetching category units:", error);
+    res.status(500).json({ error: "Failed to fetch category units" });
+  }
+});
+
+// Create a unit for a category
+router.post("/categories/:categoryId/units", authMiddleware, async (req, res) => {
+  const { categoryId } = req.params;
+  const { name, quantity, is_base } = req.body;
+  if (!name) {
+    return res.status(400).json({ error: "Unit name is required" });
+  }
+  try {
+    const [category] = await pool.query(
+      "SELECT id FROM categories WHERE id = ? AND shop_id = ?",
+      [categoryId, req.user.shop_id]
+    );
+    if (category.length === 0) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+    if (is_base) {
+      await pool.query(
+        "UPDATE category_units SET is_base = 0 WHERE category_id = ?",
+        [categoryId]
+      );
+    }
+    const [result] = await pool.query(
+      "INSERT INTO category_units (category_id, name, quantity, is_base) VALUES (?, ?, ?, ?)",
+      [categoryId, name, quantity || 1, is_base ? 1 : 0]
+    );
+    const [unit] = await pool.query(
+      "SELECT * FROM category_units WHERE id = ?",
+      [result.insertId]
+    );
+    res.json(unit[0]);
+  } catch (error) {
+    console.error("Error creating category unit:", error);
+    res.status(500).json({ error: "Failed to create category unit" });
+  }
+});
+
+// Update a category unit
+router.put("/categories/:categoryId/units/:unitId", authMiddleware, async (req, res) => {
+  const { categoryId, unitId } = req.params;
+  const { name, quantity, is_base } = req.body;
+  try {
+    const [category] = await pool.query(
+      "SELECT id FROM categories WHERE id = ? AND shop_id = ?",
+      [categoryId, req.user.shop_id]
+    );
+    if (category.length === 0) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+    if (is_base) {
+      await pool.query(
+        "UPDATE category_units SET is_base = 0 WHERE category_id = ? AND id != ?",
+        [categoryId, unitId]
+      );
+    }
+    const [result] = await pool.query(
+      "UPDATE category_units SET name = COALESCE(?, name), quantity = COALESCE(?, quantity), is_base = COALESCE(?, is_base) WHERE id = ? AND category_id = ?",
+      [name || null, quantity || null, is_base !== undefined ? (is_base ? 1 : 0) : null, unitId, categoryId]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Unit not found" });
+    }
+    const [unit] = await pool.query(
+      "SELECT * FROM category_units WHERE id = ?",
+      [unitId]
+    );
+    res.json(unit[0]);
+  } catch (error) {
+    console.error("Error updating category unit:", error);
+    res.status(500).json({ error: "Failed to update category unit" });
+  }
+});
+
+// Delete a category unit
+router.delete("/categories/:categoryId/units/:unitId", authMiddleware, async (req, res) => {
+  const { categoryId, unitId } = req.params;
+  try {
+    const [category] = await pool.query(
+      "SELECT id FROM categories WHERE id = ? AND shop_id = ?",
+      [categoryId, req.user.shop_id]
+    );
+    if (category.length === 0) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+    const [unit] = await pool.query(
+      "SELECT is_base FROM category_units WHERE id = ? AND category_id = ?",
+      [unitId, categoryId]
+    );
+    if (unit.length === 0) {
+      return res.status(404).json({ error: "Unit not found" });
+    }
+    if (unit[0].is_base) {
+      return res.status(400).json({ error: "Cannot delete the base unit" });
+    }
+    await pool.query("DELETE FROM category_units WHERE id = ? AND category_id = ?", [unitId, categoryId]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting category unit:", error);
+    res.status(500).json({ error: "Failed to delete category unit" });
   }
 });
 
